@@ -2,7 +2,6 @@ package com.rosewood.payroll;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,7 +13,7 @@ class TaxCalculatorTest {
 
     private static final double PRECISION = 0.000001;
 
-    private final TaxCalculator calculator = TaxCalculator.withStandardBands();
+    private final TaxCalculator calculator = new TaxCalculator(StandardTaxBands.current());
 
     @ParameterizedTest(name = "{0}")
     @CsvSource({
@@ -56,13 +55,21 @@ class TaxCalculatorTest {
     }
 
     @Test
-    void failsLoudlyWhenNoBandCoversTheGrossPay() {
+    void failsWithADomainExceptionWhenNoBandCoversTheGrossPay() {
         TaxCalculator withoutLowBand =
                 new TaxCalculator(List.of(new TaxBand("MEDIUM", 1000, 0.15)));
 
-        IllegalStateException failure =
-                assertThrows(IllegalStateException.class, () -> withoutLowBand.calculateTax(500));
+        TaxBandNotFoundException failure = assertThrows(TaxBandNotFoundException.class,
+                () -> withoutLowBand.calculateTax(500));
 
-        assertTrue(failure.getMessage().contains("500"));
+        assertEquals(500.0, failure.getGrossPay(), PRECISION);
+    }
+
+    @Test
+    void aMissingBandIsAPayrollFailureLikeAnyOther() {
+        TaxCalculator withoutLowBand =
+                new TaxCalculator(List.of(new TaxBand("MEDIUM", 1000, 0.15)));
+
+        assertThrows(PayrollException.class, () -> withoutLowBand.calculateTax(500));
     }
 }

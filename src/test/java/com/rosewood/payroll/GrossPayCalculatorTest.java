@@ -1,9 +1,11 @@
 package com.rosewood.payroll;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class GrossPayCalculatorTest {
 
@@ -25,5 +27,25 @@ class GrossPayCalculatorTest {
     void calculatesHoursTimesRatePlusOvertimePremium(
             String scenario, double hours, double rate, double expectedGross) {
         assertEquals(expectedGross, calculator.calculateGrossPay(hours, rate), PRECISION);
+    }
+
+    @ParameterizedTest
+    @ValueSource(doubles = {-0.01, -5, Double.NaN, Double.POSITIVE_INFINITY})
+    void rejectsHoursThatCannotBePaid(double badHours) {
+        InvalidPayInputException failure = assertThrows(InvalidPayInputException.class,
+                () -> calculator.calculateGrossPay(badHours, 20));
+
+        assertEquals("Hours worked", failure.getField());
+        assertEquals(badHours, failure.getValue());
+    }
+
+    @ParameterizedTest
+    @ValueSource(doubles = {-0.01, -20, Double.NaN, Double.POSITIVE_INFINITY})
+    void rejectsAHourlyRateThatCannotBePaid(double badRate) {
+        InvalidPayInputException failure = assertThrows(InvalidPayInputException.class,
+                () -> calculator.calculateGrossPay(40, badRate));
+
+        assertEquals("Hourly rate", failure.getField());
+        assertEquals(badRate, failure.getValue());
     }
 }

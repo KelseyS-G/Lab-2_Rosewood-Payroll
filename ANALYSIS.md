@@ -1,7 +1,5 @@
 # What's wrong with the code we inherited
 
-
-
 ## The biggest problem: it quietly pays zero when anything goes wrong
 
 ```java
@@ -52,13 +50,16 @@ come a close second, because they are the reason nobody spotted any of this.
 6. **Magic numbers (§3.4, §10.1).** `40`, `0.5`, `1000`, `5000`, `0.05`, `0.15` and `0.25`
    appear bare, with comments like `// LOW` doing the job a name should do.
 
+7. **`null` stands in for "not found" (§6).** `findById` returns `null` when there is no
+   such employee. That hides a failure case inside the return type, and it is easy for a
+   caller to forget to check. The starter doesn't really check it at all, which is how
+   problem #1 happens.
+
 ## Things I noticed but am leaving alone on purpose
 
 - **Money is a `double`**, and nothing is rounded (`1 h @ 999.99` nets `949.9905`).
   Switching to `BigDecimal` would change the public API and every figure, and the brief
   doesn't ask for it. I'll flag it rather than slip it in.
-- **`findById` returns `null` for "not found".** It isn't pretty, but it is the existing
-  contract. I'll keep it and check for null in the one place that calls it.
 - **Tax is a flat rate on the whole gross pay.** That means earning a pesewa more can
   leave you with less: gross `999.99` nets `949.99`, but gross `1000.00` nets `850.00`
   (I checked). That is a business rule, not a coding mistake, so I'll preserve it and ask
@@ -84,7 +85,8 @@ look healthy on these tests while proving nothing, which is the trap §9 warns a
 1. Pin down what the code does today with real, hand-worked assertions, so I can refactor
    without changing anyone's pay by accident.
 2. Make failures loud: an explicit existence check and custom exceptions.
-3. Split gross pay and tax out of the calculator and inject every dependency.
+3. Split gross pay and tax out of the calculator, inject every dependency, and have the
+   repository return an `Optional` instead of `null`.
 4. Turn the tax bands into data, so the new band is something you add, not something you
    rewrite.
 5. As my one extra, reject nonsense input (negative, `NaN`, infinite).

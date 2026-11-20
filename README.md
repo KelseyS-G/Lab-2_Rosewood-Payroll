@@ -10,8 +10,15 @@ If you want to know what was wrong with the original, start with
 
 ## Running it
 
-You need JDK 21 and Maven.
+You need JDK 21 and Maven. From the project folder:
 
+- Run the unit tests: `mvn test`
+- Run the tests and get a coverage report: `mvn verify`
+- Run mutation testing: `mvn test-compile org.pitest:pitest-maven:mutationCoverage`
+- See the service run on a few examples: `mvn compile exec:java -Dexec.mainClass=com.rosewood.payroll.Demo`
+
+The demo lives in `src/main/java/com/rosewood/payroll/Demo.java`. It pays two employees and
+then asks for an unknown one, so you can see the failure being reported instead of a quiet zero.
 
 ## How it's put together
 
@@ -20,13 +27,13 @@ The original did everything inside one method. Now each class has a single job, 
 
 | Class | What it does |
 |-------|--------------|
-| `PayrollCalculator` | Checks the input, finds the employee, then asks for gross pay and tax and works out the net. It has no pay rules of its own. |
-| `GrossPayCalculator` | Hours times rate, plus overtime (anything over 40 hours is paid at time-and-a-half). |
-| `TaxCalculator` and `TaxBand` | Finds the tax band that matches a gross pay and applies its rate. The bands are plain data. |
-| `EmployeeRepository` | Where employees come from. It's handed to the calculator rather than created inside it. |
-| `PayrollException`, `EmployeeNotFoundException`, `InvalidPayInputException` | The failures the service reports on purpose. |
-
-`Employee` and `InMemoryEmployeeRepository` are exactly as I found them.
+| `PayrollCalculator` | Checks the employee id, finds the employee, then asks for gross pay and tax and works out the net. It has no pay rules of its own, and it logs any failure once before passing it on. |
+| `GrossPayCalculator` | Hours times rate, plus overtime (anything over 40 hours is paid at time-and-a-half). It also refuses hours or rates that can't be paid. |
+| `TaxCalculator` and `TaxBand` | Finds the tax band that matches a gross pay and applies its rate. It holds no rates itself. |
+| `StandardTaxBands` | Rosewood's tax table, kept in one place, apart from the calculation. |
+| `EmployeeRepository` | Where employees come from. It's handed to the calculator rather than created inside it, and it returns an `Optional` so "not found" can't be missed. |
+| `InMemoryEmployeeRepository` | A simple repository that holds whatever employees it's given. It contains no sample data of its own. |
+| `PayrollException` and its subclasses | `EmployeeNotFoundException`, `InvalidPayInputException` and `TaxBandNotFoundException`: the failures the service reports on purpose. Each carries the details (the id, the field, the gross pay) so callers and tests don't have to read the message text. |
 
 Because everything the calculator depends on is passed in through its constructor, any of
 it can be swapped out in a test. That's how the tests simulate a missing employee or a
@@ -36,8 +43,7 @@ broken database.
 
 Rosewood is about to add a new tax band, so I shaped the code to make that easy. Each band
 only says where it **starts**, and it applies until the next band begins. That means adding
-a band is one new entry in the list that `TaxCalculator` is built with, and nothing else
-needs to change:
+a band is one new line in `StandardTaxBands`, and nothing else needs to change:
 
 ```java
 new TaxBand("TOP", 20000, 0.30)
@@ -57,15 +63,23 @@ change if it is.
 
 - **Failures are loud now.** The original wrapped everything in `catch (Exception)` and
   returned `0`, so a missing employee got a payslip of zero and nobody was told. That's gone.
-  An unknown employee throws `EmployeeNotFoundException`, and if the repository itself
-  breaks, that error goes straight to the caller untouched.
+  Every failure is a named exception, and a broken repository's error goes straight to the
+  caller untouched.
+- **Failures leave a trace.** `PayrollCalculator` logs a failure once, at the edge of the
+  service (a warning for expected problems like an unknown employee, an error for anything
+  unexpected), then throws it again unchanged. It uses the JDK's built-in logger, so there's
+  nothing extra to install.
 - **"Employee not found" is checked on purpose.** In the original it only worked by accident:
-  the code noticed a missing employee because a `println` crashed on it. Now the check is
-  explicit.
+  the code noticed a missing employee because a `println` crashed on it. Now the repository
+  says "nothing found" with an empty `Optional`, and the calculator turns that into a clear
+  exception. A blank or missing employee id is reported as bad input, not as an unknown employee.
 - **No printing from inside a calculation.** The `println` was a side effect. Only `Demo`
   prints now.
 - **Magic numbers have names.** `40` and `0.5` became constants, and the tax rates and limits
-  live in one place instead of being scattered through an `if` chain.
+  live in `StandardTaxBands` instead of being scattered through an `if` chain.
+- **No sample data in the repository.** The employees used to be written into
+  `InMemoryEmployeeRepository`. Now the caller supplies them: `Demo` and the tests create
+  their own.
 
 ## What I did with the AI's code and tests
 
@@ -76,6 +90,9 @@ change if it is.
 | `catch (Exception) { return 0; }` | **Removed** | It was the most serious defect, because it hid every failure. |
 | `System.out.println` in the calculation | **Removed** | A side effect, and the reason "not found" only worked by accident. |
 | `new InMemoryEmployeeRepository()` inside the calculator | **Rewrote** as constructor injection | It couldn't be tested or swapped. |
+| `findById` returning `null` | **Rewrote** to return an `Optional` | It hid the "not found" case in the return type. |
+| Hard-coded employees inside `InMemoryEmployeeRepository` | **Moved** to `Demo` and the tests | Sample data doesn't belong in production code. |
+| `Employee` | **Kept**, only reformatted the one-line getters to match the rest of the code | Nothing else was wrong with it. |
 | Test `calculatesOvertimePay` | **Deleted** | It mocked the class it was meant to test, so it only tested Mockito. Overtime is now tested properly in `GrossPayCalculatorTest`. |
 | Test `calculatesNetPay` | **Rewrote** with exact figures | It only checked that the answer was above zero, which almost anything satisfies. |
 | Test `returnsPayForAnEmployee` | **Deleted** | It checked a `double` wasn't null, which can never fail. |
@@ -84,7 +101,8 @@ change if it is.
 
 The original accepted any numbers at all. `-5` hours produced a net pay of `-95.0`, and `NaN`
 hours produced `NaN`. Negative, `NaN` and infinite hours or rates are now rejected with an
-`InvalidPayInputException` before any money is worked out.
+`InvalidPayInputException` before any money is worked out. The check lives in
+`GrossPayCalculator`, so it holds even if someone uses that class on its own.
 
 I picked this because a wrong payslip from bad input is the kind of mistake that slips
 through unnoticed. It's a small change, and it closes a gap that the main fixes didn't cover.
@@ -97,5 +115,3 @@ through unnoticed. It's a small change, and it closes a gap that the main fixes 
 2. **Tax is a flat rate on the whole gross pay.** So earning slightly more can leave you with
    less: gross `999.99` nets `949.99`, but gross `1000.00` nets `850.00`. I've kept it exactly
    as it was. The new band is a good moment to ask whether bands should be marginal instead.
-3. **`EmployeeRepository` returns `null` for "not found".** I didn't change that contract. The
-   one place that calls it checks for `null` explicitly.
